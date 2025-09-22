@@ -1,7 +1,7 @@
 import crypto from "crypto";
 
-// Next.js API Route on Vercel (Node.js runtime)
-// Vendors will use links like:
+// Serverless Function on Vercel
+// Vendors will hit:
 //   https://r.datadive.in/c?rid={RID}&src={VENDOR}
 //   https://r.datadive.in/t?rid={RID}&src={VENDOR}
 //   https://r.datadive.in/q?rid={RID}&src={VENDOR}
@@ -60,9 +60,6 @@ export default async function handler(req, res) {
   // Forward only whitelisted params (never send src/vendor info!)
   if (rid) forward.searchParams.set("rid", String(rid));
 
-  // Optional: add UID mapping (if client uses different ID system)
-  // forward.searchParams.set("uid", mapRidToUid(rid));
-
   // Optional: add HMAC signature for client verification
   if (process.env.SIGNING_SECRET && rid) {
     const sig = sign(process.env.SIGNING_SECRET, String(rid));
@@ -93,8 +90,3 @@ function randomId() {
 function sign(secret, value) {
   return crypto.createHmac("sha256", secret).update(value).digest("hex");
 }
-
-// Example placeholder if you want to map vendor RID → client UID
-// function mapRidToUid(rid) {
-//   return rid; // replace with your own lookup/mapping logic
-// }
