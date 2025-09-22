@@ -1,5 +1,5 @@
 {
   "rewrites": [
-    { "source": "/:status", "destination": "/api/redirect/:status" }
+    { "source": "/:status", "destination": "/api/:status" }
   ]
 }
