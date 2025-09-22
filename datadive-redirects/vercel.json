@@ -1,0 +1,9 @@
+{
+    "rewrites": [
+      { "source": "/c", "destination": "/api/redirect/c" },
+      { "source": "/t", "destination": "/api/redirect/t" },
+      { "source": "/q", "destination": "/api/redirect/q" },
+      { "source": "/ping", "destination": "/ping" }
+    ]
+  }
+  

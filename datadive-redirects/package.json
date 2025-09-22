@@ -1,0 +1,8 @@
+{
+    "name": "datadive-redirects",
+    "private": true,
+    "version": "1.0.0",
+    "description": "Survey redirect layer for Data Dive Market Research (Vercel)",
+    "license": "MIT"
+  }
+  
