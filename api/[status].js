@@ -23,6 +23,19 @@ const GOMR_BASE        = process.env.GOMR_BASE || "https://globalopinionmr.com/a
 const ENABLE_VENDOR_S2S = (process.env.ENABLE_VENDOR_S2S || "true").toLowerCase() === "true";
 // ---------------------------------------------------------
 
+if (process.env.SHEETS_WEBHOOK) {
+  fetch(process.env.SHEETS_WEBHOOK, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({
+      status,
+      rid,
+      src,
+      user_agent: req.headers["user-agent"] || ""
+    })
+  }).catch(() => {});
+}
+
 // Map the three statuses to your client final URLs
 const CLIENT_URLS = {
   complete:  CLIENT_COMPLETE_URL,
