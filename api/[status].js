@@ -83,7 +83,8 @@ export default async function handler(req, res) {
 
   // --------- 5) Build client redirect ---
   const forward = new URL(clientBase);
-  if (rid) forward.searchParams.set("rid", rid);
+  const idParam = process.env.FORWARD_ID_PARAM || "rid";
+  if (rid) forward.searchParams.set(idParam, rid);
 
   if (SIGNING_SECRET && rid) {
     forward.searchParams.set("sig", sign(SIGNING_SECRET, rid));
