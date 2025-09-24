@@ -4,9 +4,9 @@ import crypto from "crypto";
 // CONFIG (via Environment Variables in Vercel)
 // ---------------------------------------------
 // Client final URLs (required)
-const CLIENT_COMPLETE_URL  = process.env.CLIENT_COMPLETE_URL;   // e.g. https://client.com/complete
-const CLIENT_TERMINATE_URL = process.env.CLIENT_TERMINATE_URL;  // e.g. https://client.com/terminate
-const CLIENT_QUOTA_URL     = process.env.CLIENT_QUOTA_URL;      // e.g. https://client.com/quota
+const CLIENT_COMPLETE_URL  = process.env.CLIENT_COMPLETE_URL;
+const CLIENT_TERMINATE_URL = process.env.CLIENT_TERMINATE_URL;
+const CLIENT_QUOTA_URL     = process.env.CLIENT_QUOTA_URL;
 
 // (Optional) Sign client redirects so they can verify authenticity
 const SIGNING_SECRET = process.env.SIGNING_SECRET || "";
@@ -15,26 +15,15 @@ const SIGNING_SECRET = process.env.SIGNING_SECRET || "";
 const GA4_MEASUREMENT_ID = process.env.GA4_MEASUREMENT_ID || "";
 const GA4_API_SECRET     = process.env.GA4_API_SECRET || "";
 
+// (Optional) Google Sheets webhook (Apps Script Web App URL with ?token=...)
+// Example: https://script.google.com/macros/s/XXXX/exec?token=YYYY
+const SHEETS_WEBHOOK = process.env.SHEETS_WEBHOOK || "";
+
 // -------- Vendor S2S Postback (Global Opinion MR) --------
-// Give each vendor a short key via ?src=vendorKey (e.g., src=gomr)
-// For GOMR, add these env vars in Vercel:
-const GOMR_PID         = process.env.GOMR_PID || ""; // REQUIRED: vendor's project id (pid=...)
-const GOMR_BASE        = process.env.GOMR_BASE || "https://globalopinionmr.com/admintool";
+const GOMR_PID          = process.env.GOMR_PID || "";
+const GOMR_BASE         = process.env.GOMR_BASE || "https://globalopinionmr.com/admintool";
 const ENABLE_VENDOR_S2S = (process.env.ENABLE_VENDOR_S2S || "true").toLowerCase() === "true";
 // ---------------------------------------------------------
-
-if (process.env.SHEETS_WEBHOOK) {
-  fetch(process.env.SHEETS_WEBHOOK, {
-    method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify({
-      status,
-      rid,
-      src,
-      user_agent: req.headers["user-agent"] || ""
-    })
-  }).catch(() => {});
-}
 
 // Map the three statuses to your client final URLs
 const CLIENT_URLS = {
@@ -45,22 +34,12 @@ const CLIENT_URLS = {
 
 // Map vendor keys to their postback templates (server-to-server, never exposed)
 const VENDOR_TEMPLATES = {
-  // Global Opinion MR (GOMR)
-  // Uses GET and expects: pid, uid
   gomr: {
     complete:  `${GOMR_BASE}/complete?pid={pid}&uid={uid}`,
     terminate: `${GOMR_BASE}/terminate?pid={pid}&uid={uid}`,
     quota:     `${GOMR_BASE}/quotafull?pid={pid}&uid={uid}`,
-    pid:       () => GOMR_PID,     // function in case you later swap to per-project lookup
+    pid:       () => GOMR_PID,
   },
-
-  // You can add more vendors here in future, e.g.:
-  // acme: {
-  //   complete: "https://acme.com/postback?token=XYZ&status=complete&uid={uid}",
-  //   terminate:"https://acme.com/postback?token=XYZ&status=terminate&uid={uid}",
-  //   quota:    "https://acme.com/postback?token=XYZ&status=quota&uid={uid}",
-  //   pid:      () => "", // not used for this vendor
-  // },
 };
 
 export default async function handler(req, res) {
@@ -76,34 +55,41 @@ export default async function handler(req, res) {
     return res.status(404).send("Unknown status");
   }
   if (!rid) {
-    // We strongly prefer RID present to reconcile; still redirect if needed, but warn in logs
     console.warn(`[redirect] missing rid for status=${status} src=${src}`);
   }
 
-  // --------- 1) Log to Vercel (internal only) ----------
-  console.log(`[redirect] status=${status} rid=${rid} src=${src} ua=${req.headers["user-agent"] || ""}`);
+  // --------- 1) Log to Vercel ----------
+  const ua = req.headers["user-agent"] || "";
+  console.log(`[redirect] status=${status} rid=${rid} src=${src} ua=${ua}`);
 
-  // --------- 2) Optional GA4 event (fire-and-forget) ----
+  // --------- 2) Optional GA4 event ----
   if (GA4_MEASUREMENT_ID && GA4_API_SECRET) {
     fireGA4({ status, rid, src }).catch(() => {});
   }
 
-  // --------- 3) Vendor S2S Postback (never exposed) -----
-  // We do this server-side so the vendor URL is not visible to the browser.
+  // --------- 3) (Optional) Google Sheets logging ----
+  if (SHEETS_WEBHOOK) {
+    fetch(SHEETS_WEBHOOK, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ status, rid, src, user_agent: ua }),
+    }).catch(() => {});
+  }
+
+  // --------- 4) Vendor S2S Postback -----
   if (ENABLE_VENDOR_S2S && src) {
     notifyVendor({ src, status, rid }).catch(() => {});
   }
 
-  // --------- 4) Build client redirect (whitelist params) -
+  // --------- 5) Build client redirect ---
   const forward = new URL(clientBase);
   if (rid) forward.searchParams.set("rid", rid);
 
-  // Optional: add signature for client verification
   if (SIGNING_SECRET && rid) {
     forward.searchParams.set("sig", sign(SIGNING_SECRET, rid));
   }
 
-  // --------- 5) Redirect respondent to client -----------
+  // --------- 6) Redirect ---------------
   res.setHeader("Location", forward.toString());
   res.status(302).end();
 }
@@ -124,10 +110,9 @@ function sign(secret, value) {
 async function fireGA4({ status, rid, src }) {
   const body = {
     client_id: rid || randomId(),
-    events: [{
-      name: "survey_redirect",
-      params: { status, rid, src }
-    }]
+    events: [
+      { name: "survey_redirect", params: { status, rid, src } }
+    ]
   };
   await fetch(
     `https://www.google-analytics.com/mp/collect?measurement_id=${GA4_MEASUREMENT_ID}&api_secret=${GA4_API_SECRET}`,
@@ -147,7 +132,6 @@ async function notifyVendor({ src, status, rid }) {
   const template = v[status];
   if (!template) return;
 
-  // Some vendors need pid; for GOMR it's required
   const pid = typeof v.pid === "function" ? v.pid() : v.pid;
   const url = template
     .replace("{pid}", encodeURIComponent(String(pid || "")))
@@ -155,9 +139,8 @@ async function notifyVendor({ src, status, rid }) {
 
   if (!url) return;
 
-  // Short timeout so we never block the user redirect
   const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), 900); // 900ms cap
+  const timeout = setTimeout(() => controller.abort(), 900);
 
   try {
     await fetch(url, { method: "GET", signal: controller.signal });
