@@ -1,7 +1,9 @@
 {
   "rewrites": [
-    { "source": "/start",       "destination": "/api/start" },
-    { "source": "/:status", "destination": "/api/:status" },
-
+    { "source": "/c",      "destination": "/api/c" },
+    { "source": "/t",      "destination": "/api/t" },
+    { "source": "/q",      "destination": "/api/q" },
+    { "source": "/start",  "destination": "/api/start" },
+    { "source": "/ping",   "destination": "/api/ping" }
   ]
 }
