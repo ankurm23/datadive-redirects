@@ -94,7 +94,22 @@ export default async function handler(req, res) {
   res.setHeader("Location", forward.toString());
   res.status(302).end();
 }
+function normalizeStatus(s) {
+  if (!s) return "unknown";
+  s = s.toLowerCase();
 
+  if (s === "c" || s === "complete") return "complete";
+  if (s === "t" || s === "terminate" || s === "term") return "terminate";
+  if (
+    s === "q" || 
+    s === "quota" || 
+    s === "quotafull" || 
+    s === "qf" || 
+    s === "overquota"
+  ) return "quota";
+
+  return "unknown";
+}
 // ----------------- Helpers -----------------
 
 function normalizeStatus(s) {
