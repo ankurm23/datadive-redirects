@@ -3,26 +3,19 @@ import crypto from "crypto";
 // ---------------------------------------------
 // CONFIG (via Environment Variables in Vercel)
 // ---------------------------------------------
-// Client final URLs (required)
 const CLIENT_COMPLETE_URL  = process.env.CLIENT_COMPLETE_URL;
 const CLIENT_TERMINATE_URL = process.env.CLIENT_TERMINATE_URL;
 const CLIENT_QUOTA_URL     = process.env.CLIENT_QUOTA_URL;
 
-// (Optional) Sign client redirects so they can verify authenticity
-const SIGNING_SECRET = process.env.SIGNING_SECRET || "";
+const SIGNING_SECRET       = process.env.SIGNING_SECRET || "";
+const GA4_MEASUREMENT_ID   = process.env.GA4_MEASUREMENT_ID || "";
+const GA4_API_SECRET       = process.env.GA4_API_SECRET || "";
+const SHEETS_WEBHOOK       = process.env.SHEETS_WEBHOOK || "";
 
-// (Optional) GA4 logging (free analytics)
-const GA4_MEASUREMENT_ID = process.env.GA4_MEASUREMENT_ID || "";
-const GA4_API_SECRET     = process.env.GA4_API_SECRET || "";
+const GOMR_PID             = process.env.GOMR_PID || "";
+const GOMR_BASE            = process.env.GOMR_BASE || "https://globalopinionmr.com/admintool";
+const ENABLE_VENDOR_S2S    = (process.env.ENABLE_VENDOR_S2S || "true").toLowerCase() === "true";
 
-// (Optional) Google Sheets webhook (Apps Script Web App URL with ?token=...)
-// Example: https://script.google.com/macros/s/XXXX/exec?token=YYYY
-const SHEETS_WEBHOOK = process.env.SHEETS_WEBHOOK || "";
-
-// -------- Vendor S2S Postback (Global Opinion MR) --------
-const GOMR_PID          = process.env.GOMR_PID || "";
-const GOMR_BASE         = process.env.GOMR_BASE || "https://globalopinionmr.com/admintool";
-const ENABLE_VENDOR_S2S = (process.env.ENABLE_VENDOR_S2S || "true").toLowerCase() === "true";
 // ---------------------------------------------------------
 
 // Map the three statuses to your client final URLs
@@ -32,7 +25,7 @@ const CLIENT_URLS = {
   quota:     CLIENT_QUOTA_URL,
 };
 
-// Map vendor keys to their postback templates (server-to-server, never exposed)
+// Vendor templates
 const VENDOR_TEMPLATES = {
   gomr: {
     complete:  `${GOMR_BASE}/complete?pid={pid}&uid={uid}`,
@@ -44,21 +37,9 @@ const VENDOR_TEMPLATES = {
 
 export default async function handler(req, res) {
   const statusRaw = String(req.query.status || "").toLowerCase();
-  const status = normalizeStatus(statusRaw); // c/t/q -> complete/terminate/quota
+  const status = normalizeStatus(statusRaw);
 
-  const rid = String(req.query.rid || "");  // respondent id
-  const src = String(req.query.src || "");  // vendor key, e.g. 'gomr'
-
-  const clientBase = CLIENT_URLS[status];
-
-  if (!clientBase) {
-    return res.status(404).send("Unknown status");
-  }
-  if (!rid) {
-    console.warn(`[redirect] missing rid for status=${status} src=${src}`);
-  }
-const rid =
-  String(
+  const rid = String(
     req.query.rid ||
     req.query.pid ||
     req.query.uid ||
@@ -67,16 +48,25 @@ const rid =
     req.query.ddid ||
     ""
   );
-  // --------- 1) Log to Vercel ----------
+
+  const src = String(req.query.src || "");  
+
+  const clientBase = CLIENT_URLS[status];
+  if (!clientBase) return res.status(404).send("Unknown status");
+
+  if (!rid) {
+    console.warn(`[redirect] missing rid for status=${status} src=${src}`);
+  }
+
   const ua = req.headers["user-agent"] || "";
   console.log(`[redirect] status=${status} rid=${rid} src=${src} ua=${ua}`);
 
-  // --------- 2) Optional GA4 event ----
+  // GA4
   if (GA4_MEASUREMENT_ID && GA4_API_SECRET) {
     fireGA4({ status, rid, src }).catch(() => {});
   }
 
-  // --------- 3) (Optional) Google Sheets logging ----
+  // Google Sheets logging
   if (SHEETS_WEBHOOK) {
     fetch(SHEETS_WEBHOOK, {
       method: "POST",
@@ -85,12 +75,12 @@ const rid =
     }).catch(() => {});
   }
 
-  // --------- 4) Vendor S2S Postback -----
+  // Vendor S2S
   if (ENABLE_VENDOR_S2S && src) {
     notifyVendor({ src, status, rid }).catch(() => {});
   }
 
-  // --------- 5) Build client redirect ---
+  // Build client redirect
   const forward = new URL(clientBase);
   const idParam = process.env.FORWARD_ID_PARAM || "rid";
   if (rid) forward.searchParams.set(idParam, rid);
@@ -99,32 +89,16 @@ const rid =
     forward.searchParams.set("sig", sign(SIGNING_SECRET, rid));
   }
 
-  // --------- 6) Redirect ---------------
   res.setHeader("Location", forward.toString());
   res.status(302).end();
 }
-function normalizeStatus(s) {
-  if (!s) return "unknown";
-  s = s.toLowerCase();
 
-  if (s === "c" || s === "complete") return "complete";
-  if (s === "t" || s === "terminate" || s === "term") return "terminate";
-  if (
-    s === "q" || 
-    s === "quota" || 
-    s === "quotafull" || 
-    s === "qf" || 
-    s === "overquota"
-  ) return "quota";
-
-  return "unknown";
-}
 // ----------------- Helpers -----------------
-
-function normalizeStatus(s) {
-  if (s === "c" || s === "complete") return "complete";
-  if (s === "t" || s === "terminate") return "terminate";
-  if (s === "q" || s === "quota" || s === "quotafull") return "quota";
+function normalizeStatus(s = "") {
+  s = s.toLowerCase();
+  if (s === "c" || s.includes("complete")) return "complete";
+  if (s === "t" || s.includes("terminate") || s.includes("term")) return "terminate";
+  if (s === "q" || s.includes("quota") || s.includes("qf") || s.includes("overquota")) return "quota";
   return "unknown";
 }
 
@@ -135,9 +109,7 @@ function sign(secret, value) {
 async function fireGA4({ status, rid, src }) {
   const body = {
     client_id: rid || randomId(),
-    events: [
-      { name: "survey_redirect", params: { status, rid, src } }
-    ]
+    events: [{ name: "survey_redirect", params: { status, rid, src } }]
   };
   await fetch(
     `https://www.google-analytics.com/mp/collect?measurement_id=${GA4_MEASUREMENT_ID}&api_secret=${GA4_API_SECRET}`,
@@ -149,7 +121,6 @@ function randomId() {
   return Math.random().toString(16).slice(2) + Math.random().toString(16).slice(2);
 }
 
-// Fire-and-forget vendor S2S postback with short timeout
 async function notifyVendor({ src, status, rid }) {
   const v = VENDOR_TEMPLATES[src];
   if (!v || !rid) return;
@@ -161,8 +132,6 @@ async function notifyVendor({ src, status, rid }) {
   const url = template
     .replace("{pid}", encodeURIComponent(String(pid || "")))
     .replace("{uid}", encodeURIComponent(rid));
-
-  if (!url) return;
 
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), 900);
