@@ -1,9 +1,7 @@
 {
   "rewrites": [
-    { "source": "/start", "destination": "/api/start" },
-    { "source": "/:status", "destination": "/api/:status" }
+    { "source": "/start",       "destination": "/api/start" },
 
-    
     { "source": "/c",           "destination": "/api/status?status=complete" },
     { "source": "/t",           "destination": "/api/status?status=terminate" },
     { "source": "/q",           "destination": "/api/status?status=quota" },
@@ -20,10 +18,7 @@
     { "source": "/quotafull",   "destination": "/api/status?status=quota" },
     { "source": "/qf",          "destination": "/api/status?status=quota" },
 
-    
     { "source": "/finish/:tag*", "destination": "/api/status?status=:tag" },
     { "source": "/end/:tag*",    "destination": "/api/status?status=:tag" }
- 
   ]
-  
 }
