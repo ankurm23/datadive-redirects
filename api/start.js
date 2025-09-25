@@ -55,7 +55,9 @@ export default async function handler(req, res) {
 
   // 3) Forward into client's start link with pid=<RID>
   // If you also want to pass the RID as uid (not required), you can append &uid=<RID>.
-  const forwardUrl = base + encodeURIComponent(rid);
+  const u = new URL(base + encodeURIComponent(rid));
+  u.searchParams.set("uid", rid);
+  const forwardUrl = u.toString();
 
   res.setHeader("Location", forwardUrl);
   res.status(302).end();
