@@ -20,7 +20,7 @@
     { "source": "/quotafull",   "destination": "/api/status?status=quota" },
     { "source": "/qf",          "destination": "/api/status?status=quota" },
 
-    /* optional catch-all like /finish/complete, /end/qf etc. */
+    
     { "source": "/finish/:tag*", "destination": "/api/status?status=:tag" },
     { "source": "/end/:tag*",    "destination": "/api/status?status=:tag" }
  
