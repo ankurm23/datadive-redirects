@@ -57,7 +57,16 @@ export default async function handler(req, res) {
   if (!rid) {
     console.warn(`[redirect] missing rid for status=${status} src=${src}`);
   }
-
+const rid =
+  String(
+    req.query.rid ||
+    req.query.pid ||
+    req.query.uid ||
+    req.query.respondentid ||
+    req.query.user_id ||
+    req.query.ddid ||
+    ""
+  );
   // --------- 1) Log to Vercel ----------
   const ua = req.headers["user-agent"] || "";
   console.log(`[redirect] status=${status} rid=${rid} src=${src} ua=${ua}`);
