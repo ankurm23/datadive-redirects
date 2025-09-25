@@ -1,24 +1,22 @@
 // api/start.js
-function genNumericRid() {
-  // 12-digit numeric ID (timestamp + random)
-  const ts = Date.now().toString().slice(-8);
-  const rnd = Math.floor(Math.random() * 1e4).toString().padStart(4, "0");
-  return ts + rnd; // e.g. 84736251 0421 => "847362510421"
+function genRid() {
+  return (
+    "RID-" +
+    Math.random().toString(36).slice(2, 10) +
+    Math.random().toString(36).slice(2, 10)
+  );
 }
 
+// Client’s start links exactly as provided (keep pid=XXX)
 const CELL_STARTS = {
-  "uae-main-ar":
-    "https://app.worldwide-research.ai/surveyInitiate.php?gid=MTA5MTMtNTQ4NTI=&pid=",
-  "uae-boost-ar":
-    "https://app.worldwide-research.ai/surveyInitiate.php?gid=MTA5MjAtNTQ4NDU=&pid=",
-  "uae-boost-en":
-    "https://app.worldwide-research.ai/surveyInitiate.php?gid=MTA5MjctNTQ4Mzg=&pid=",
-  "uae-main-en":
-    "https://app.worldwide-research.ai/surveyInitiate.php?gid=MTA5MzQtNTQ4MzE=&pid=",
+  "uae-main-ar":  "https://app.worldwide-research.ai/surveyInitiate.php?gid=MTA5MTMtNTQ4NTI=&pid=XXX",
+  "uae-boost-ar": "https://app.worldwide-research.ai/surveyInitiate.php?gid=MTA5MjAtNTQ4NDU=&pid=XXX",
+  "uae-boost-en": "https://app.worldwide-research.ai/surveyInitiate.php?gid=MTA5MjctNTQ4Mzg=&pid=XXX",
+  "uae-main-en":  "https://app.worldwide-research.ai/surveyInitiate.php?gid=MTA5MzQtNTQ4MzE=&pid=XXX",
 };
 
 const SHEETS_WEBHOOK = process.env.SHEETS_WEBHOOK || "";
-const PROJECT_NAME = process.env.PROJECT_NAME || "UAE_10N_Pilot";
+const PROJECT_NAME   = process.env.PROJECT_NAME || "UAE_10N_Pilot";
 
 export default async function handler(req, res) {
   const src  = String(req.query.src || "unknown");
@@ -30,10 +28,10 @@ export default async function handler(req, res) {
     return;
   }
 
-  // 1) Generate a SIMPLE NUMERIC pid
-  const rid = genNumericRid();
+  // Generate your tracking RID
+  const rid = genRid();
 
-  // 2) Log entry (optional)
+  // Log entry (optional)
   if (SHEETS_WEBHOOK) {
     fetch(SHEETS_WEBHOOK, {
       method: "POST",
@@ -49,8 +47,9 @@ export default async function handler(req, res) {
     }).catch(() => {});
   }
 
-  // 3) Forward to client with ONLY pid=<rid>
-  const forwardUrl = base + encodeURIComponent(rid);
+  // Forward with pid replaced by RID
+  const forwardUrl = base.replace("pid=XXX", "pid=" + encodeURIComponent(rid));
+
   res.setHeader("Location", forwardUrl);
   res.status(302).end();
 }
