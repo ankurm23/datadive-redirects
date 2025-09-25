@@ -1,31 +1,34 @@
 import crypto from "crypto";
 
-// ---------------------------------------------
-// CONFIG (via Environment Variables in Vercel)
-// ---------------------------------------------
-const CLIENT_COMPLETE_URL  = process.env.CLIENT_COMPLETE_URL;
-const CLIENT_TERMINATE_URL = process.env.CLIENT_TERMINATE_URL;
-const CLIENT_QUOTA_URL     = process.env.CLIENT_QUOTA_URL;
+// =========================
+// ENV CONFIG (Vercel)
+// =========================
+const CLIENT_COMPLETE_URL  = process.env.CLIENT_COMPLETE_URL || "";
+const CLIENT_TERMINATE_URL = process.env.CLIENT_TERMINATE_URL || "";
+const CLIENT_QUOTA_URL     = process.env.CLIENT_QUOTA_URL || "";
+
+const FORWARD_ID_PARAM     = process.env.FORWARD_ID_PARAM || "rid"; // e.g. "uid" for GOMR
 
 const SIGNING_SECRET       = process.env.SIGNING_SECRET || "";
+
 const GA4_MEASUREMENT_ID   = process.env.GA4_MEASUREMENT_ID || "";
 const GA4_API_SECRET       = process.env.GA4_API_SECRET || "";
+
 const SHEETS_WEBHOOK       = process.env.SHEETS_WEBHOOK || "";
 
-const GOMR_PID             = process.env.GOMR_PID || "";
+// ---- Vendor S2S (optional) ----
+const ENABLE_VENDOR_S2S    = (process.env.ENABLE_VENDOR_S2S || "false").toLowerCase() === "true";
+const GOMR_PID             = process.env.GOMR_PID || "GOMR(PO)";
 const GOMR_BASE            = process.env.GOMR_BASE || "https://globalopinionmr.com/admintool";
-const ENABLE_VENDOR_S2S    = (process.env.ENABLE_VENDOR_S2S || "true").toLowerCase() === "true";
 
-// ---------------------------------------------------------
-
-// Map the three statuses to your client final URLs
+// Map final URLs by status (these may be vendor pages in Option B)
 const CLIENT_URLS = {
   complete:  CLIENT_COMPLETE_URL,
   terminate: CLIENT_TERMINATE_URL,
   quota:     CLIENT_QUOTA_URL,
 };
 
-// Vendor templates
+// Vendor postback templates (used only if ENABLE_VENDOR_S2S=true)
 const VENDOR_TEMPLATES = {
   gomr: {
     complete:  `${GOMR_BASE}/complete?pid={pid}&uid={uid}`,
@@ -36,37 +39,29 @@ const VENDOR_TEMPLATES = {
 };
 
 export default async function handler(req, res) {
-  const statusRaw = String(req.query.status || "").toLowerCase();
-  const status = normalizeStatus(statusRaw);
+  const status = normalizeStatus(String(req.query.status || ""));
+  const rid    = String(req.query.rid || "");        // respondent id we got back from client
+  const src    = String(req.query.src || "");        // vendor key (e.g., "gomr")
+  const ua     = req.headers["user-agent"] || "";
 
-  const rid = String(
-    req.query.rid ||
-    req.query.pid ||
-    req.query.uid ||
-    req.query.respondentid ||
-    req.query.user_id ||
-    req.query.ddid ||
-    ""
-  );
-
-  const src = String(req.query.src || "");  
-
+  if (!status) {
+    return res.status(400).send("Bad request: unknown status");
+  }
   const clientBase = CLIENT_URLS[status];
-  if (!clientBase) return res.status(404).send("Unknown status");
-
-  if (!rid) {
-    console.warn(`[redirect] missing rid for status=${status} src=${src}`);
+  if (!clientBase) {
+    console.error(`[redirect] missing CLIENT_URL for status=${status}`);
+    return res.status(500).send("Server misconfiguration for status");
   }
 
-  const ua = req.headers["user-agent"] || "";
-  console.log(`[redirect] status=${status} rid=${rid} src=${src} ua=${ua}`);
+  // 1) Log basics
+  console.log(`[redirect] status=${status} rid=${rid || "(none)"} src=${src} ua=${ua}`);
 
-  // GA4
+  // 2) GA4 (fire-and-forget)
   if (GA4_MEASUREMENT_ID && GA4_API_SECRET) {
     fireGA4({ status, rid, src }).catch(() => {});
   }
 
-  // Google Sheets logging
+  // 3) Google Sheets logging (fire-and-forget)
   if (SHEETS_WEBHOOK) {
     fetch(SHEETS_WEBHOOK, {
       method: "POST",
@@ -75,31 +70,36 @@ export default async function handler(req, res) {
     }).catch(() => {});
   }
 
-  // Vendor S2S
-  if (ENABLE_VENDOR_S2S && src) {
+  // 4) Optional vendor S2S (keep OFF for Option B)
+  if (ENABLE_VENDOR_S2S && src && rid) {
     notifyVendor({ src, status, rid }).catch(() => {});
   }
 
-  // Build client redirect
-  const forward = new URL(clientBase);
-  const idParam = process.env.FORWARD_ID_PARAM || "rid";
-  if (rid) forward.searchParams.set(idParam, rid);
-
-  if (SIGNING_SECRET && rid) {
-    forward.searchParams.set("sig", sign(SIGNING_SECRET, rid));
+  // 5) Build the final redirect
+  let forward;
+  try {
+    forward = new URL(clientBase);
+  } catch {
+    console.error(`[redirect] invalid CLIENT_URL for ${status}: ${clientBase}`);
+    return res.status(500).send("Invalid redirect URL");
   }
 
+  if (rid) forward.searchParams.set(FORWARD_ID_PARAM, rid); // e.g., &uid=<rid> for GOMR
+  if (SIGNING_SECRET && rid) forward.searchParams.set("sig", sign(SIGNING_SECRET, rid));
+
+  // 6) Go!
   res.setHeader("Location", forward.toString());
   res.status(302).end();
 }
 
 // ----------------- Helpers -----------------
-function normalizeStatus(s = "") {
-  s = s.toLowerCase();
-  if (s === "c" || s.includes("complete")) return "complete";
-  if (s === "t" || s.includes("terminate") || s.includes("term")) return "terminate";
-  if (s === "q" || s.includes("quota") || s.includes("qf") || s.includes("overquota")) return "quota";
-  return "unknown";
+
+function normalizeStatus(s) {
+  const v = s.toLowerCase();
+  if (v === "c" || v === "complete")   return "complete";
+  if (v === "t" || v === "terminate")  return "terminate";
+  if (v === "q" || v === "quota" || v === "quotafull") return "quota";
+  return "";
 }
 
 function sign(secret, value) {
@@ -109,7 +109,7 @@ function sign(secret, value) {
 async function fireGA4({ status, rid, src }) {
   const body = {
     client_id: rid || randomId(),
-    events: [{ name: "survey_redirect", params: { status, rid, src } }]
+    events: [{ name: "survey_redirect", params: { status, rid, src } }],
   };
   await fetch(
     `https://www.google-analytics.com/mp/collect?measurement_id=${GA4_MEASUREMENT_ID}&api_secret=${GA4_API_SECRET}`,
@@ -134,7 +134,7 @@ async function notifyVendor({ src, status, rid }) {
     .replace("{uid}", encodeURIComponent(rid));
 
   const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), 900);
+  const timeout = setTimeout(() => controller.abort(), 900); // don’t block user
 
   try {
     await fetch(url, { method: "GET", signal: controller.signal });
